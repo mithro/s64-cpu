@@ -1,0 +1,15 @@
+; hello.s64 — first real S64 assembly program
+
+.section .rodata
+msg:    .str "Hello, S64!\n"
+
+.section .text
+.global _start
+_start:
+    MOVI  R0, #1          ; fd = stdout
+    MOVI  R1, #0          ; buf addr (placeholder)
+    MOVI  R2, #12         ; length of "Hello, S64!\n"
+    SYS   #1              ; write syscall
+    MOVI  R0, #0          ; exit code 0
+    SYS   #60             ; exit syscall
+    HLT

@@ -1,0 +1,9 @@
+; add.s64 — adds 10 + 32 = 42, stores in R2, halts
+
+.section .text
+.global _start
+_start:
+    MOVI  R0, #10         ; R0 = 10
+    MOVI  R1, #32         ; R1 = 32
+    ADD   R2, R0, R1      ; R2 = R0 + R1 = 42
+    HLT
