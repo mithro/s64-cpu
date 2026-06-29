@@ -212,6 +212,13 @@ int cpu_step(S64CPU *cpu) {
         reg_write(cpu, rd, mem_read64(reg_read(cpu, rs1)));
         break;
 
+    case OP_ILLEGAL:
+        fprintf(stderr, "s64emu: illegal opcode 0x00 (OP_ILLEGAL) at PC 0x%016llx"
+                " — likely jumped into unmapped/zeroed memory\n",
+                (unsigned long long)cpu->pc);
+        cpu_fault(cpu, S64_FAULT_ILLEGAL_OP);
+        return -1;
+
     default:
         fprintf(stderr, "s64emu: illegal opcode 0x%02x at PC 0x%016llx\n",
                 op, (unsigned long long)cpu->pc);

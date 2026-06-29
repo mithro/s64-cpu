@@ -3,7 +3,10 @@
 // Matches s64.h exactly
 
 // integer ALU
-`define OP_ADD   8'h00
+// 0x00 reserved as ILLEGAL — never valid, always faults (FAULT_ILLEGAL_OP).
+// Zeroed/unmapped memory therefore faults immediately instead of decoding
+// as a silently-valid instruction.
+`define OP_ILLEGAL 8'h00
 `define OP_SUB   8'h01
 `define OP_MUL   8'h02
 `define OP_DIV   8'h03
@@ -11,6 +14,7 @@
 `define OP_ADDI  8'h05
 `define OP_SUBI  8'h06
 `define OP_MULI  8'h07
+`define OP_ADD   8'h08
 
 // bitwise & shift
 `define OP_AND   8'h10

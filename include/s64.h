@@ -57,8 +57,12 @@ typedef int64_t   s64_t;
 
 /* ─── opcodes ─────────────────────────────────────────────────── */
 
-/* integer ALU — 0x00–0x0F */
-#define OP_ADD      0x00    /* Rd = Rs1 + Rs2 */
+/* 0x00 is reserved as ILLEGAL — never a valid instruction. Zeroed/unmapped
+ * memory therefore always faults immediately on execution instead of being
+ * silently interpreted as a real op (the old encoding put ADD at 0x00). */
+#define OP_ILLEGAL  0x00    /* reserved — always faults (S64_FAULT_ILLEGAL_OP) */
+
+/* integer ALU — 0x01–0x0F */
 #define OP_SUB      0x01    /* Rd = Rs1 - Rs2 */
 #define OP_MUL      0x02    /* Rd = Rs1 * Rs2 (low 64) */
 #define OP_DIV      0x03    /* Rd = Rs1 / Rs2 (signed) */
@@ -66,6 +70,7 @@ typedef int64_t   s64_t;
 #define OP_ADDI     0x05    /* Rd = Rs1 + imm8 (M=1) */
 #define OP_SUBI     0x06    /* Rd = Rs1 - imm8 (M=1) */
 #define OP_MULI     0x07    /* Rd = Rs1 * imm8 (M=1) */
+#define OP_ADD      0x08    /* Rd = Rs1 + Rs2 */
 
 /* bitwise & shift — 0x10–0x1F */
 #define OP_AND      0x10    /* Rd = Rs1 & Rs2 */

@@ -120,7 +120,16 @@ module s64_ex (
                         begin branch_taken = 1'b1; branch_pc = rs2_raw; end
                 `OP_DIV, `OP_MOD:
                     if (operand_b == 32'h0) fault = `FAULT_DIV_ZERO;
-                default: ;
+                // control flow / memory / system opcodes don't route through
+                // the ALU, so alu_valid doesn't apply to them — only fall
+                // through to the illegal-opcode check below for anything
+                // not explicitly handled here or by the ALU.
+                `OP_LD64, `OP_LD32, `OP_LD16, `OP_LD8,
+                `OP_ST64, `OP_ST32, `OP_ST16, `OP_ST8,
+                `OP_NOP, `OP_HLT, `OP_SYS, `OP_PUSH, `OP_POP:
+                    ; // handled elsewhere in the pipeline (mem/wb stages)
+                default:
+                    if (!alu_valid) fault = `FAULT_ILLEGAL_OP;
             endcase
         end
     end

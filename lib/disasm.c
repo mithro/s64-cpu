@@ -29,6 +29,7 @@ int disasm_instr(u32 instr, u64 pc, char *buf, size_t bufsz) {
 #define RX(mnem) (m ? RI(mnem) : RR(mnem))
 
     switch (op) {
+    case OP_ILLEGAL: return OUT("ILLEGAL  (reserved 0x00 -- never valid)");
     /* integer ALU */
     case OP_ADD:  case OP_ADDI: return RX("ADD");
     case OP_SUB:  case OP_SUBI: return RX("SUB");

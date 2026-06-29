@@ -67,8 +67,8 @@ module s64_tb;
         imem[0] = {8'h49, 5'd0, 5'd0, 5'd0, 8'd10, 1'b1};
         // MOVI R1, #32   — opcode=0x49, rd=1, imm8=32, M=1
         imem[1] = {8'h49, 5'd1, 5'd0, 5'd0, 8'd32, 1'b1};
-        // ADD  R2,R0,R1  — opcode=0x00, rd=2, rs1=0, rs2=1, M=0
-        imem[2] = {8'h00, 5'd2, 5'd0, 5'd1, 8'd0,  1'b0};
+        // ADD  R2,R0,R1  — opcode=0x08 (0x00 reserved as ILLEGAL), rd=2, rs1=0, rs2=1, M=0
+        imem[2] = {8'h08, 5'd2, 5'd0, 5'd1, 8'd0,  1'b0};
         // HLT            — opcode=0x61
         imem[3] = {8'h61, 5'd0, 5'd0, 5'd0, 8'd0,  1'b0};
         // padding

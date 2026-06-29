@@ -9,7 +9,7 @@ int main(void) {
     uint32_t prog[] = {
         ENCODE(0x49, 0, 0, 0, 1, 1),  /* MOVI R0, #1     */
         ENCODE(0x49, 1, 0, 0, 2, 1),  /* MOVI R1, #2     */
-        ENCODE(0x00, 2, 0, 1, 0, 0),  /* ADD  R2, R0, R1 */
+        ENCODE(0x08, 2, 0, 1, 0, 0),  /* ADD  R2, R0, R1 (opcode moved from 0x00->0x08; 0x00 is now ILLEGAL) */
         ENCODE(0x61, 0, 0, 0, 0, 0),  /* HLT             */
     };
     FILE *f = fopen("tests/asm/add_test.bin", "wb");
