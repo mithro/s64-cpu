@@ -27,6 +27,11 @@ typedef struct {
 typedef enum {
     RELOC_ABS    = 1,
     RELOC_PCREL  = 2,
+    RELOC_WIDE   = 3,   /* reserved for LA pseudo-op: patches a 4-instruction
+                         * MOVI+3xMOVW chain as one unit. NOT YET IMPLEMENTED
+                         * — symtab_resolve()/reloc_patch() don't act on this
+                         * type yet. Added so the struct layout is settled
+                         * before the actual backpatch logic is written. */
 } RelocType;
 
 typedef struct {
