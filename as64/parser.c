@@ -408,6 +408,15 @@ static void handle_instruction(Parser *p, Token mnem_tok) {
         sect_emit32(p, ENCODE_INSTR(OP_MOVW, rd, 0, 0, 0, 1));
         sect_emit32(p, ENCODE_INSTR(OP_MOVW, rd, 0, 0, 0, 1));
         sect_emit32(p, ENCODE_INSTR(OP_MOVW, rd, 0, 0, 0, 1));
+        /* LA always defers resolution to ld64, even for a label that's
+         * never defined anywhere in this file. If the symbol isn't
+         * already known (locally defined or .extern'd), implicitly
+         * register it as extern so symtab_resolve() doesn't flag it
+         * as a hard error -- ld64 (or a later link unit) is expected
+         * to supply/resolve it. */
+        if (!symtab_find(&p->syms, label))
+            symtab_add_extern(&p->syms, label);
+
         symtab_add_reloc(&p->syms, label, base, p->cur_sect, RELOC_WIDE, 1);
         return;
     }

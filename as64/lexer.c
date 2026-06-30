@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-
+#include <strings.h>
 void lexer_init(Lexer *l, const char *src, size_t len, const char *filename) {
     l->src      = src;
     l->len      = len;

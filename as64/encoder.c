@@ -74,6 +74,9 @@ static const OpcodeEntry opcode_table[] = {
     { "SYS",   OP_SYS,   1 },
     { "PUSH",  OP_PUSH,  0 },
     { "POP",   OP_POP,   0 },
+    { "TRAP",  OP_TRAP,  1 },
+    { "SRET",  OP_SRET,  0 },
+    { "SETPRIV", OP_SETPRIV, 1 },
     { NULL, 0, 0 }
 };
 
@@ -245,6 +248,22 @@ uint32_t encoder_encode(const Instruction *ins, const char *filename) {
     case OP_SYS:
         REQ_OPS(1);
         return encode(op, 0, 0, 0, IMM0, 1);
+
+    /* ── TRAP: #imm (cause code) ──────────────────────────────── */
+    case OP_TRAP:
+        REQ_OPS(1);
+        return encode(op, 0, 0, 0, IMM0, 1);
+
+    /* ── SRET: no operands ────────────────────────────────────── */
+    case OP_SRET:
+        return encode(op, 0, 0, 0, 0, 0);
+
+    /* ── SETPRIV: Rs1, #imm (target PC, target level) ─────────── */
+    case OP_SETPRIV:
+        REQ_OPS(2);
+        if (ins->ops[0].type != OPT_REG)
+            ERR("SETPRIV requires Rs1, #imm");
+        return encode(op, 0, (uint8_t)ins->ops[0].reg, 0, IMM1, 1);
 
     /* ── PUSH: Rs1, Rs2 ───────────────────────────────────────── */
     case OP_PUSH:

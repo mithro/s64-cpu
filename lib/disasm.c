@@ -112,6 +112,9 @@ int disasm_instr(u32 instr, u64 pc, char *buf, size_t bufsz) {
     case OP_NOP:  return OUT("NOP");
     case OP_HLT:  return OUT("HLT");
     case OP_SYS:  return OUT("%-8s #%u", "SYS", (unsigned)imm8);
+    case OP_TRAP: return OUT("%-8s #%u", "TRAP", (unsigned)imm8);
+    case OP_SRET: return OUT("%-8s", "SRET");
+    case OP_SETPRIV: return OUT("%-8s %s, #%u", "SETPRIV", rn(rs1), (unsigned)imm8);
     case OP_PUSH: return OUT("%-8s %s, %s", "PUSH", rn(rs1), rn(rs2));
     case OP_POP:  return OUT("%-8s %s, %s", "POP",  rn(rd),  rn(rs1));
 

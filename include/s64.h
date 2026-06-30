@@ -130,6 +130,27 @@ typedef int64_t   s64_t;
 #define OP_SYS      0x62    /* syscall imm8 = call number */
 #define OP_PUSH     0x63    /* mem[Rs2]=Rs1; Rs2-=8 (convention) */
 #define OP_POP      0x64    /* Rs1+=8; Rd=mem[Rs1] (convention) */
+#define OP_TRAP     0x65    /* trap into SL0. imm8 = cause code (M=1).
+                              * Saves PC+priv to dedicated trap-state regs
+                              * (not GPRs -- usermode can't forge a return),
+                              * raises priv to SL0, jumps to MEM_FAULT_VECTOR. */
+#define OP_SRET     0x66    /* system return: restores PC+priv from the
+                              * dedicated trap-state regs saved by the most
+                              * recent TRAP/fault entry. Privileged: faults
+                              * with S64_FAULT_PRIV unless current priv==SL0. */
+#define OP_SETPRIV  0x67    /* privileged. SETPRIV Rs1, #imm8 (M=1):
+                              * imm8[1:0] = target privilege level,
+                              * Rs1 = target PC. Overwrites both
+                              * trap_saved_pc and trap_saved_priv -- the
+                              * state the NEXT SRET will restore. Without
+                              * this, SRET can only ever resume wherever
+                              * TRAP/fault came FROM, so a kernel could
+                              * never construct "start this new program at
+                              * SL3, entry point X" -- the actual operation
+                              * an OS needs for exec()/process creation.
+                              * Typical pattern: SETPRIV R5, #3 ; SRET
+                              * (where R5 holds the user program's entry
+                              * address) demotes to SL3 starting at R5. */
 
 /* 0x70–0xFF reserved for future extensions */
 
@@ -234,6 +255,17 @@ typedef enum {
     S64_MODE_32BIT = 1,
 } S64ExecMode;
 
+/* ─── privilege levels ────────────────────────────────────────── */
+/* SL0 = most privileged (machine-mode equivalent), SL3 = least
+ * privileged (normal userspace). Strictly hierarchical: SL0 can do
+ * everything SL1-3 can, SL1 everything SL2-3 can, etc. Lower number =
+ * more privilege, matching the "SL0 is machine mode" framing this was
+ * designed against. */
+#define S64_PRIV_SL0  0
+#define S64_PRIV_SL1  1
+#define S64_PRIV_SL2  2
+#define S64_PRIV_SL3  3
+
 /* ─── cpu state ───────────────────────────────────────────────── */
 typedef struct {
     u64          regs[S64_NUM_REGS];   /* R0–R31 (R31 always reads 0) */
@@ -243,6 +275,19 @@ typedef struct {
     int          fault;                 /* fault code, 0 = ok */
     u64          cycles;                /* cycle counter */
     u64          instrs;                /* instruction counter */
+
+    /* privilege state. Deliberately NOT in regs[] -- these are CPU
+     * state a userspace program must never be able to forge, so they
+     * live outside the general-purpose register file entirely rather
+     * than relying on convention (the way R27/trap-link-register was
+     * previously just an ordinary GPR anyone could write). */
+    u8           priv;          /* current privilege level, S64_PRIV_SL0-3 */
+    u8           trap_cause;    /* set by TRAP's imm8 or a fault code on
+                                  * entry to SL0; read-only to software,
+                                  * lets the SL0 handler dispatch on why
+                                  * it was entered. */
+    u64          trap_saved_pc;     /* PC to resume at on SRET */
+    u8           trap_saved_priv;   /* priv level to resume at on SRET */
 } S64CPU;
 
 /* fault codes */
@@ -251,6 +296,8 @@ typedef struct {
 #define S64_FAULT_DIV_ZERO      2
 #define S64_FAULT_BAD_ALIGN     3
 #define S64_FAULT_BAD_ADDR      4
+#define S64_FAULT_PRIV          5   /* privileged instruction executed
+                                      * outside SL0 */
 
 /* SABI syscall numbers (SYS instruction, #imm8 selects which).
  * Implemented today in emu/main.c:cpu_syscall(). This is the only

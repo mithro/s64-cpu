@@ -9,12 +9,14 @@ void cpu_init(S64CPU *cpu, S64ExecMode mode) {
     memset(cpu, 0, sizeof(S64CPU));
     cpu->pc   = MEM_RAM_BASE;
     cpu->mode = mode;
+    cpu->priv = S64_PRIV_SL0;  /* boot/firmware code is trusted by definition */
 }
 
 void cpu_reset(S64CPU *cpu) {
     u64 mode = cpu->mode;
     memset(cpu, 0, sizeof(S64CPU));
     cpu->mode = mode;
+    cpu->priv = S64_PRIV_SL0;
     /* jump through reset vector */
     cpu->pc = mem_read64(MEM_RESET_VECTOR);
     if (cpu->pc == 0) cpu->pc = MEM_RAM_BASE; /* emulator default */
@@ -33,18 +35,35 @@ static inline void reg_write(S64CPU *cpu, u8 r, u64 val) {
     cpu->regs[r] = val;
 }
 
-/* ─── fault ───────────────────────────────────────────────────── */
-static void cpu_fault(S64CPU *cpu, int code) {
-    cpu->fault  = code;
-    cpu->halted = 1;
-    /* jump to fault vector */
+/* ─── trap entry — shared by faults and the TRAP instruction ─────
+ * Saves PC and current privilege into dedicated trap-state (NOT a
+ * GPR -- the old code used R27 as a "trap link register" by pure
+ * convention, which meant any userspace code could read or clobber
+ * it). Always raises privilege to SL0; never lowers it -- a TRAP or
+ * fault from SL2 still lands at SL0, same as real hardware. */
+static void cpu_trap_enter(S64CPU *cpu, u8 cause) {
+    cpu->trap_saved_pc   = cpu->pc;
+    cpu->trap_saved_priv = cpu->priv;
+    cpu->trap_cause       = cause;
+    cpu->priv             = S64_PRIV_SL0;
+
     u64 handler = mem_read64(MEM_FAULT_VECTOR);
     if (handler) {
-        cpu->regs[REG_R27] = cpu->pc;  /* save PC to trap link reg */
         cpu->pc = handler;
-        cpu->halted = 0;
-        cpu->fault  = S64_FAULT_NONE;
+    } else {
+        /* no handler installed -- nothing to dispatch to, so this is
+         * unrecoverable for now. Distinct from "ran off the end of
+         * memory": this is "trapped with nowhere to go". */
+        cpu->halted = 1;
     }
+}
+
+/* ─── fault ───────────────────────────────────────────────────── */
+static void cpu_fault(S64CPU *cpu, int code) {
+    cpu->fault = code;
+    cpu_trap_enter(cpu, (u8)code);
+    if (mem_read64(MEM_FAULT_VECTOR))
+        cpu->fault = S64_FAULT_NONE; /* handler will run; not a hard halt */
 }
 
 /* ─── single step ─────────────────────────────────────────────── */
@@ -75,11 +94,21 @@ int cpu_step(S64CPU *cpu) {
     case OP_SUB:  case OP_SUBI: reg_write(cpu, rd, v1 - v2); break;
     case OP_MUL:  case OP_MULI: reg_write(cpu, rd, v1 * v2); break;
     case OP_DIV:
-        if (v2 == 0) { cpu_fault(cpu, S64_FAULT_DIV_ZERO); return -1; }
+        if (v2 == 0) {
+            cpu_fault(cpu, S64_FAULT_DIV_ZERO);
+            if (cpu->halted) return -1;
+            next_pc = cpu->pc;
+            break;
+        }
         reg_write(cpu, rd, (u64)((s64_t)v1 / (s64_t)v2));
         break;
     case OP_MOD:
-        if (v2 == 0) { cpu_fault(cpu, S64_FAULT_DIV_ZERO); return -1; }
+        if (v2 == 0) {
+            cpu_fault(cpu, S64_FAULT_DIV_ZERO);
+            if (cpu->halted) return -1;
+            next_pc = cpu->pc;
+            break;
+        }
         reg_write(cpu, rd, (u64)((s64_t)v1 % (s64_t)v2));
         break;
 
@@ -135,10 +164,39 @@ int cpu_step(S64CPU *cpu) {
     case OP_LD32: reg_write(cpu, rd, mem_read32(v1 + uimm)); break;
     case OP_LD16: reg_write(cpu, rd, mem_read16(v1 + uimm)); break;
     case OP_LD8:  reg_write(cpu, rd, mem_read8 (v1 + uimm)); break;
-    case OP_ST64: mem_write64(v2 + uimm, reg_read(cpu, rd)); break;
-    case OP_ST32: mem_write32(v2 + uimm, reg_read(cpu, rd) & 0xFFFFFFFF); break;
-    case OP_ST16: mem_write16(v2 + uimm, reg_read(cpu, rd) & 0xFFFF); break;
-    case OP_ST8:  mem_write8 (v2 + uimm, reg_read(cpu, rd) & 0xFF);   break;
+    case OP_ST64: {
+        /* Address is base register (rs2) + immediate offset (when M=1).
+         * NOT v2/uimm -- those are only valid for register-register ALU
+         * forms; here rs2 is always a real base register regardless of
+         * M, so it must always be read directly. Pre-existing bug: this
+         * used to compute v2+uimm, which for M=1 (the only form the
+         * assembler's [Rs2 + #imm] syntax ever encodes) evaluates to
+         * imm+imm -- silently dropping the base register and doubling
+         * the offset. Found while testing TRAP/SRET against a non-zero
+         * base register; affects every ST64/32/16/8 with a non-zero
+         * base and non-zero offset, likely since before this session. */
+        u64 addr = reg_read(cpu, rs2) + (m ? (u64)imm8 : 0);
+        if (addr == MEM_FAULT_VECTOR && cpu->priv != S64_PRIV_SL0) {
+            cpu_fault(cpu, S64_FAULT_PRIV);
+            if (cpu->halted) return -1;
+            next_pc = cpu->pc;
+            break;
+        }
+        mem_write64(addr, reg_read(cpu, rd));
+        break;
+    }
+    case OP_ST32:
+        mem_write32(reg_read(cpu, rs2) + (m ? (u64)imm8 : 0),
+                    reg_read(cpu, rd) & 0xFFFFFFFF);
+        break;
+    case OP_ST16:
+        mem_write16(reg_read(cpu, rs2) + (m ? (u64)imm8 : 0),
+                    reg_read(cpu, rd) & 0xFFFF);
+        break;
+    case OP_ST8:
+        mem_write8(reg_read(cpu, rs2) + (m ? (u64)imm8 : 0),
+                   reg_read(cpu, rd) & 0xFF);
+        break;
     case OP_MOV:  reg_write(cpu, rd, v1); break;
     case OP_MOVI: reg_write(cpu, rd, uimm); break;
     case OP_MOVW:
@@ -212,18 +270,55 @@ int cpu_step(S64CPU *cpu) {
         reg_write(cpu, rd, mem_read64(reg_read(cpu, rs1)));
         break;
 
+    case OP_TRAP:
+        /* imm8 = cause code, software-defined (e.g. syscall number,
+         * or any app-specific reason). cpu_trap_enter() saves the
+         * resume-after address (next_pc, not cpu->pc -- matches
+         * CALL's Rd=PC+4 convention: TRAP resumes after itself, not
+         * by re-executing), raises priv to SL0, jumps to the vector. */
+        cpu->pc = next_pc;
+        cpu_trap_enter(cpu, imm8);
+        next_pc = cpu->pc;
+        break;
+
+    case OP_SRET:
+        /* privileged: only SL0 may drop privilege back down */
+        if (cpu->priv != S64_PRIV_SL0) {
+            cpu_fault(cpu, S64_FAULT_PRIV);
+            next_pc = cpu->pc;
+            break;
+        }
+        cpu->priv = cpu->trap_saved_priv;
+        next_pc   = cpu->trap_saved_pc;
+        break;
+
+    case OP_SETPRIV:
+        /* privileged: only SL0 may set up a demotion target */
+        if (cpu->priv != S64_PRIV_SL0) {
+            cpu_fault(cpu, S64_FAULT_PRIV);
+            next_pc = cpu->pc;
+            break;
+        }
+        cpu->trap_saved_pc   = v1;            /* Rs1 = target entry PC */
+        cpu->trap_saved_priv = imm8 & 0x03;   /* low 2 bits = target level */
+        break;
+
     case OP_ILLEGAL:
         fprintf(stderr, "s64emu: illegal opcode 0x00 (OP_ILLEGAL) at PC 0x%016llx"
                 " — likely jumped into unmapped/zeroed memory\n",
                 (unsigned long long)cpu->pc);
         cpu_fault(cpu, S64_FAULT_ILLEGAL_OP);
-        return -1;
+        if (cpu->halted) return -1;
+        next_pc = cpu->pc; /* handler ran, vector address already in pc */
+        break;
 
     default:
         fprintf(stderr, "s64emu: illegal opcode 0x%02x at PC 0x%016llx\n",
                 op, (unsigned long long)cpu->pc);
         cpu_fault(cpu, S64_FAULT_ILLEGAL_OP);
-        return -1;
+        if (cpu->halted) return -1;
+        next_pc = cpu->pc;
+        break;
     }
 
     cpu->pc = next_pc;
@@ -254,11 +349,15 @@ void cpu_dump_regs(S64CPU *cpu) {
            (unsigned long long)cpu->cycles,
            (unsigned long long)cpu->instrs,
            cpu->halted, cpu->fault);
+    printf("  priv=SL%d  trap_cause=%u  trap_saved_pc=0x%016llx  trap_saved_priv=SL%d\n",
+           cpu->priv, cpu->trap_cause,
+           (unsigned long long)cpu->trap_saved_pc,
+           cpu->trap_saved_priv);
 }
 
 /* ─── minimal syscall stub ────────────────────────────────────── */
 __attribute__((weak))
 void cpu_syscall(S64CPU *cpu, u8 num) {
-    /* override this in main.c for full syscall support */
+    /* overriding this in main.c for full syscall support */
     (void)cpu; (void)num;
 }
