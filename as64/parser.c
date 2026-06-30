@@ -124,30 +124,17 @@ static void backpatch_relocs(Parser *p) {
             r->patched = 1;
             break;
 
-        case RELOC_WIDE: {
-            /* 4 consecutive instruction words (16 bytes): MOVI carries
-             * the MSB (bits 31:24 of target), the three MOVWs carry the
-             * next three bytes down to the LSB, matching the LA chain
-             * semantics: Rd = imm; Rd = (Rd<<8)|imm; Rd = (Rd<<8)|imm; ...
-             * Always exactly 4 words/16 bytes regardless of value --
-             * fixed-length by design, see LA pseudo-op rationale. */
-            if (r->offset + 16 > sect->size) {
-                fprintf(stderr, "as64: backpatch: wide reloc out of bounds for '%s'\n",
-                        r->sym_name);
-                p->errors++;
-                break;
-            }
-            uint8_t bytes[4] = {
-                (uint8_t)((target >> 24) & 0xFF),
-                (uint8_t)((target >> 16) & 0xFF),
-                (uint8_t)((target >> 8)  & 0xFF),
-                (uint8_t)(target         & 0xFF),
-            };
-            for (int w = 0; w < 4; w++)
-                patch_imm8(sect->data, (uint32_t)r->offset + (uint32_t)w * 4, bytes[w]);
-            r->patched = 1;
+        case RELOC_WIDE:
+            /* Always deferred to ld64. Unlike RELOC_ABS (which carries
+             * pre-existing truncate-to-section-relative-low-byte
+             * semantics), RELOC_WIDE exists specifically to carry a
+             * full, real link-time virtual address -- and as64 never
+             * knows section base addresses, only section-relative
+             * offsets. Patching here with s->value would silently
+             * write the wrong (section-relative, not linked) address.
+             * So this case intentionally does nothing; the reloc stays
+             * unpatched and gets serialized into the .o64 file. */
             break;
-        }
 
         case RELOC_PCREL:
             /* Intra-file PC-relative is left to ld64 at link time today,
@@ -394,6 +381,36 @@ static void handle_instruction(Parser *p, Token mnem_tok) {
         peek = lexer_peek(&p->lex);
     }
     skip_line(p);
+
+    if (!strcmp(ins.mnemonic, "LA")) {
+        /* LA Rd, label -- always emits a fixed 4-instruction
+         * MOVI+3xMOVW chain (16 bytes), MSB-first, regardless of value.
+         * Fixed length by design: predictable byte offsets matter more
+         * here than saving a few bytes on small addresses. */
+        if (ins.op_count != 2 || ins.ops[0].type != OPT_REG
+            || ins.ops[1].type != OPT_LABEL) {
+            fprintf(stderr, "as64: line %d: LA requires Rd, label\n", ins.line);
+            p->errors++;
+            return;
+        }
+        int rd = ins.ops[0].reg;
+        const char *label = ins.ops[1].label;
+
+        uint32_t base = sect_pc(p);
+        /* LA always needs the link-time virtual address, which as64
+         * never knows (it only sees section-relative offsets -- ld64
+         * assigns real section base addresses). So unlike the existing
+         * MOVI/MOVW-with-label path (which truncates to a section-
+         * relative low byte, a pre-existing and separate semantic),
+         * LA must ALWAYS defer to a relocation, even when the symbol
+         * is already defined in this file. */
+        sect_emit32(p, ENCODE_INSTR(OP_MOVI, rd, 0, 0, 0, 1));
+        sect_emit32(p, ENCODE_INSTR(OP_MOVW, rd, 0, 0, 0, 1));
+        sect_emit32(p, ENCODE_INSTR(OP_MOVW, rd, 0, 0, 0, 1));
+        sect_emit32(p, ENCODE_INSTR(OP_MOVW, rd, 0, 0, 0, 1));
+        symtab_add_reloc(&p->syms, label, base, p->cur_sect, RELOC_WIDE, 1);
+        return;
+    }
 
     /* resolve label operands to immediates if possible */
     for (int i = 0; i < ins.op_count; i++) {

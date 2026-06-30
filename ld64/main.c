@@ -96,13 +96,6 @@ int main(int argc, char **argv) {
         free(objs); return 1;
     }
 
-    /* patch relocations */
-    errs = reloc_patch(objs, input_count, &sm);
-    if (errs) {
-        fprintf(stderr, "ld64: %d relocation error(s)\n", errs);
-        free(objs); return 1;
-    }
-
     /* emit output */
     LinkOpts opts = {
         .base      = base,
@@ -113,13 +106,26 @@ int main(int argc, char **argv) {
     };
 
     /* compute final layout (section addresses + patched symbol values)
-     * exactly once, BEFORE printing the map, so --map shows real,
-     * final addresses instead of pre-link zeros. */
+     * exactly once, BEFORE printing the map AND before patching
+     * relocations -- reloc_patch needs sym->value to already be the
+     * real, final linked virtual address, not the raw pre-link
+     * section-relative offset that symmap_resolve() alone produces. */
     Layout layout;
     if (emit_compute_layout(objs, input_count, &sm, opts.base, &layout)) {
         fprintf(stderr, "ld64: layout computation failed\n");
         free(objs); return 1;
     }
+
+    /* patch relocations -- now that symbol values are final addresses */
+    errs = reloc_patch(objs, input_count, &sm);
+    if (errs) {
+        fprintf(stderr, "ld64: %d relocation error(s)\n", errs);
+        free(objs); return 1;
+    }
+
+    /* sync the merged layout buffers with the now-patched bytes --
+     * build_merged() took its snapshot before reloc_patch() ran. */
+    emit_resync_layout(objs, input_count, &layout);
 
     /* print map if requested */
     if (opt_map) emit_map(objs, input_count, &sm, &layout);

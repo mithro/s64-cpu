@@ -1,5 +1,6 @@
 #include "obj.h"
 #include <stdio.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -69,19 +70,36 @@ int obj_load(ObjFile *obj, const char *path) {
     /* read symbol table (text format: name value section global) */
     if (hdr.symtab_offset > 0) {
         fseek(f, (long)hdr.symtab_offset, SEEK_SET);
+        long limit = hdr.reloctab_offset ? (long)hdr.reloctab_offset : LONG_MAX;
         char line[256];
-        while (fgets(line, sizeof(line), f) && obj->sym_count < MAX_OBJ_SYMBOLS) {
+        while (ftell(f) < limit && fgets(line, sizeof(line), f)
+               && obj->sym_count < MAX_OBJ_SYMBOLS) {
             ObjSymbol *sym = &obj->symbols[obj->sym_count];
-            int sect, global;
+            int sect, global, defined = 1;
             unsigned long long val;
-            if (sscanf(line, "%127s %llx %d %d",
-                       sym->name, &val, &sect, &global) == 4) {
+            int n = sscanf(line, "%127s %llx %d %d %d",
+                       sym->name, &val, &sect, &global, &defined);
+            if (n >= 4) {
                 sym->value   = (uint64_t)val;
                 sym->section = sect;
                 sym->global  = global;
-                sym->defined = 1;
+                sym->defined = (n == 5) ? defined : 1;
                 obj->sym_count++;
             }
+        }
+    }
+
+    if (hdr.reloctab_offset > 0) {
+        fseek(f, (long)hdr.reloctab_offset, SEEK_SET);
+        for (uint32_t i = 0; i < hdr.reloc_count && obj->reloc_count < MAX_OBJ_RELOCS; i++) {
+            SXFReloc rec;
+            if (fread(&rec, sizeof(rec), 1, f) != 1) break;
+            ObjReloc *r = &obj->relocs[obj->reloc_count++];
+            strncpy(r->sym_name, rec.sym_name, sizeof(r->sym_name)-1);
+            r->offset  = rec.offset;
+            r->section = rec.section_index;
+            r->type    = rec.type;
+            r->field   = 0;
         }
     }
 

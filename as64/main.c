@@ -121,15 +121,37 @@ static int write_o64(Parser *p, const char *path,
     for (int i = 0; i < p->sect_count; i++)
         fwrite(p->sections[i].data, 1, p->sections[i].size, f);
 
-    /* simple symbol table — name:value pairs (text format) */
+    long symtab_end = 0;
     for (int i = 0; i < p->syms.sym_count; i++) {
         Symbol *sym = &p->syms.syms[i];
-        fprintf(f, "%s 0x%llx %d %d\n",
-                sym->name,
-                (unsigned long long)sym->value,
-                sym->section,
-                sym->global);
+        fprintf(f, "%s 0x%llx %d %d %d\n",
+                sym->name, (unsigned long long)sym->value,
+                sym->section, sym->global, sym->defined);
     }
+    symtab_end = ftell(f);
+
+    int nrelocs = 0;
+    for (int i = 0; i < p->syms.reloc_count; i++)
+        if (!p->syms.relocs[i].patched) nrelocs++;
+
+    if (nrelocs > 0) {
+        for (int i = 0; i < p->syms.reloc_count; i++) {
+            Reloc *r = &p->syms.relocs[i];
+            if (r->patched) continue;
+            SXFReloc rec; memset(&rec, 0, sizeof(rec));
+            rec.offset = r->offset;
+            rec.type = (uint8_t)r->type;
+            rec.section_index = (uint8_t)r->section;
+            strncpy(rec.sym_name, r->sym_name, sizeof(rec.sym_name)-1);
+            fwrite(&rec, sizeof(rec), 1, f);
+        }
+    }
+
+    fseek(f, 0, SEEK_SET);
+    hdr.reloctab_offset = nrelocs ? (uint32_t)symtab_end : 0;
+    hdr.reloc_count = (uint32_t)nrelocs;
+    fwrite(&hdr, sizeof(hdr), 1, f);
+    fseek(f, 0, SEEK_END);
 
     fclose(f);
     printf("as64: wrote '%s'  (%d section(s))\n", path, p->sect_count);

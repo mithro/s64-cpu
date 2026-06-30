@@ -33,6 +33,7 @@ typedef struct {
  * instead of pre-link zeros. Returns -1 on error. */
 int emit_compute_layout(ObjFile *objs, int obj_count, SymMap *sm,
                          uint64_t base, Layout *out);
+void emit_resync_layout(ObjFile *objs, int obj_count, Layout *layout);
 
 int emit_x64(ObjFile *objs, int obj_count, SymMap *sm,
              const char *outpath, LinkOpts *opts, Layout *layout);

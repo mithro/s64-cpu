@@ -87,6 +87,29 @@ int emit_compute_layout(ObjFile *objs, int obj_count, SymMap *sm,
     return 0;
 }
 
+/* Re-copies section bytes from objs[] into the already-built Layout's
+ * merged buffers. Needed because build_merged() snapshots section data
+ * BEFORE relocations are patched (it has to run first, to assign the
+ * section virt_addrs that reloc_patch needs to compute targets from) --
+ * so the merged buffers go stale by the time reloc_patch() finishes.
+ * Call this after reloc_patch(), before emit_x64/emit_flat. */
+void emit_resync_layout(ObjFile *objs, int obj_count, Layout *layout) {
+    for (int oi = 0; oi < obj_count; oi++) {
+        ObjFile *obj = &objs[oi];
+        for (int i = 0; i < obj->sect_count; i++) {
+            ObjSection *s = &obj->sections[i];
+            if (!s->data || s->size == 0) continue;
+            for (int mi = 0; mi < layout->count; mi++) {
+                MergedSection *ms = &layout->sections[mi];
+                if (strcmp(ms->name, s->name)) continue;
+                uint64_t off = s->virt_addr - ms->virt_addr;
+                memcpy(ms->data + off, s->data, s->size);
+                break;
+            }
+        }
+    }
+}
+
 /* ─── emit .x64 SXF ──────────────────────────────────────────── */
 int emit_x64(ObjFile *objs, int obj_count, SymMap *sm,
              const char *outpath, LinkOpts *opts, Layout *layout) {

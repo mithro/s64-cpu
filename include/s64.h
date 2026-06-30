@@ -217,11 +217,15 @@ typedef struct __attribute__((packed)) {
 
 typedef struct __attribute__((packed)) {
     u64 offset;             /* byte offset in section to patch */
-    u64 symbol_index;       /* index into symbol table */
     u8  type;               /* SXF_RELOC_ABS / SXF_RELOC_PCREL / SXF_RELOC_WIDE */
     u8  section_index;      /* which section (index into section table) this
                               * reloc applies to. */
     u8  _pad[6];
+    char sym_name[64];      /* target symbol name, NUL-padded. A name (not a
+                              * symbol-table index) is used deliberately --
+                              * this is a small toolchain, not worth the extra
+                              * bug surface of keeping a separately-numbered
+                              * index in sync with the text-format symtab. */
 } SXFReloc;
 
 /* ─── execution mode ──────────────────────────────────────────── */

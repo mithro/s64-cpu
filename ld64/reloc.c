@@ -41,6 +41,28 @@ int reloc_patch(ObjFile *objs, int obj_count, SymMap *sm) {
 
             uint64_t target = sym->value;
 
+            if (rel->type == SXF_RELOC_WIDE) {
+                if (rel->offset + 16 > sect->size) {
+                    fprintf(stderr, "ld64: reloc: wide offset out of bounds\n");
+                    errors++;
+                    continue;
+                }
+                uint8_t bytes[4] = {
+                    (uint8_t)((target >> 24) & 0xFF),
+                    (uint8_t)((target >> 16) & 0xFF),
+                    (uint8_t)((target >> 8)  & 0xFF),
+                    (uint8_t)(target & 0xFF),
+                };
+                for (int w = 0; w < 4; w++) {
+                    uint8_t *wp = sect->data + rel->offset + w * 4;
+                    uint32_t wd = (uint32_t)wp[0] | (uint32_t)wp[1]<<8
+                                | (uint32_t)wp[2]<<16 | (uint32_t)wp[3]<<24;
+                    wd = (wd & ~(0xFFu << 1)) | ((uint32_t)bytes[w] << 1) | 1;
+                    wp[0]=wd&0xFF; wp[1]=(wd>>8)&0xFF; wp[2]=(wd>>16)&0xFF; wp[3]=(wd>>24)&0xFF;
+                }
+                continue;
+            }
+
             if (rel->type == SXF_RELOC_PCREL) {
                 /* PC-relative: encode offset in instruction imm8 field */
                 uint64_t pc = sect->virt_addr + rel->offset;
